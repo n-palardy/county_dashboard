@@ -1,0 +1,18 @@
+# R session data files
+.Rhistory
+.RData
+
+# RStudio user/project files
+.Rproj.user/
+*.Rproj
+
+# Data files (example patterns)
+*.csv
+
+# System files
+.DS_Store
+
+# Other non-essential files (optional)
+*.log
+*.out
+*.tmp
