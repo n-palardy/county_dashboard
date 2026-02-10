@@ -10,8 +10,6 @@ library(jsonlite)
 library(purrr)
 library(tibble)
 
-setwd("C:/Users/n.palardy/OneDrive - University of Florida/UF/UF workspace/R/county_dashboard_clean")
-
 # =========================
 # CBP DATA (already in your script)
 # =========================
