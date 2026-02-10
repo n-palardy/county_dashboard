@@ -138,9 +138,6 @@ cbp_dash <- cbp_fl_all %>%
 # Builds gdp_dash with county, Year, NAICS sector, Unit, GDP_millions
 # =========================
 
-# 0) Set BEA API key for this session (paste your key)
-Sys.setenv(BEA_KEY = "3942CEA9-6CA8-4835-86E9-8986C98D15F2")
-
 # 1) Libraries
 library(httr)
 library(jsonlite)
@@ -152,7 +149,7 @@ library(stringr)
 
 # 2) Key
 bea_key <- Sys.getenv("BEA_KEY")
-stopifnot(nzchar(bea_key))
+if (!nzchar(bea_key)) stop("BEA_KEY not set in environment")
 
 # 3) Retry/backoff helper
 bea_get_with_retries <- function(url, max_tries = 8, base_wait = 1) {
