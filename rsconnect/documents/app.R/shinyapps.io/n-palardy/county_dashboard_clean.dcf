@@ -1,0 +1,10 @@
+name: county_dashboard_clean
+title: Florida County Economic Dashboard
+username: n-palardy
+account: n-palardy
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 16640604
+bundleId: 11563594
+url: https://n-palardy.shinyapps.io/county_dashboard_clean/
+version: 1
