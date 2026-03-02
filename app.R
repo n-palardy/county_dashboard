@@ -17,16 +17,27 @@ cbp_dash <- readRDS(cbp_path)
 LATEST_GDP_YEAR <- max(gdp_dash$Year, na.rm = TRUE)
 LATEST_CBP_YEAR <- max(cbp_dash$year, na.rm = TRUE)
 
+# Labels for the "Choose data" option (cross-sector)
+LABEL_GDP <- "Gross Domestic Product (GDP) by industry"
+LABEL_CBP <- "Establishments, Employment, and Payroll by industry"
+
+# County Business Patterns exclusions note (displayed directly under graphs)
+CBP_EXCLUSION_NOTE <- paste(
+  "Note: The County Business Patterns data from the US Census Bureau does not include information from the following industries:",
+  "Crop and animal production; Rail transportation; Postal Service;",
+  "Insurance and employee benefit funds; Trusts, estates, and agency accounts;",
+  "Public schools and colleges; Private households; and Public administration"
+)
 # ---- UI ----
 ui <- fluidPage(
   titlePanel("Florida County Economic Dashboard"),
   tabsetPanel(
     tabPanel(
-      "GDP",
+      "Gross Domestic Product (GDP) Over Time",
       sidebarLayout(
         sidebarPanel(
           selectInput(
-            "gdp_sector", "Select Sector:",
+            "gdp_sector", "Select industry:",
             choices = sort(unique(gdp_dash$industry_title)),
             selected = "Agriculture, forestry, fishing and hunting"
           ),
@@ -50,11 +61,11 @@ ui <- fluidPage(
     ),
     
     tabPanel(
-      "CBP (Establishments, Employment, Payroll)",
+      "Establishments, Employment, and Payroll Over Time",
       sidebarLayout(
         sidebarPanel(
           selectInput(
-            "cbp_industry", "Select Industry:",
+            "cbp_industry", "Select industry:",
             choices = sort(unique(cbp_dash$industry_title)),
             selected = "Agriculture, forestry, fishing and hunting"
           ),
@@ -65,27 +76,28 @@ ui <- fluidPage(
             options = list(maxItems = 5, placeholder = "Choose counties…")
           ),
           selectInput(
-            "cbp_indicator", "Indicator:",
+            "cbp_indicator", "Economic indicator:",
             choices = c("Establishments" = "ESTAB",
                         "Employees" = "EMP",
                         "Annual payroll ($)" = "PAYANN"),
             selected = "EMP"
           ),
           actionButton("clear_cbp", "Clear selections"),
-          downloadButton("download_cbp", "Download CBP data (CSV)")
+          downloadButton("download_cbp", "Download County Business Patterns data (CSV)")
         ),
         mainPanel(
           plotOutput("cbpPlot", height = "520px"),
+          helpText(CBP_EXCLUSION_NOTE),  # directly under the graph
           tableOutput("cbpTable"),
-          helpText("Source: U.S. Census Bureau, County Business Patterns (CBP) API.",
+          helpText("Source: U.S. Census Bureau, County Business Patterns API.",
                    "Annual payroll (PAYANN) is reported in thousands of dollars; dashboard displays millions.",
-                   "Suppressed values are reported as zero by CBP and are omitted here for Employees and Annual payroll.")
+                   "Suppressed values are reported as zero by County Business Patterns and are omitted here for Employees and Annual payroll.")
         )
       )
     ),
     
     tabPanel(
-      "Latest Year Comparison",
+      "Cross-sector Comparison of Economic Indicators",
       sidebarLayout(
         sidebarPanel(
           selectizeInput(
@@ -96,44 +108,30 @@ ui <- fluidPage(
             options = list(placeholder = "Choose one or more counties…")
           ),
           checkboxInput("latest_labels", "Show value labels", TRUE),
-          radioButtons(
-            "latest_view", "Choose view:",
-            choices = c("GDP by Industry" = "gdp_industry",
-                        "CBP by Industry" = "cbp_industry"),
-            selected = "gdp_industry"
+          
+          radioButtons(  # Single selector replaces sub-tabs and "choose view"
+            "latest_data", "Choose data:",
+            choices = c(LABEL_GDP, LABEL_CBP),
+            selected = LABEL_GDP
           ),
+          
           conditionalPanel(
-            condition = "input.latest_view == 'cbp_industry'",
+            condition = sprintf("input.latest_data == '%s'", LABEL_CBP),
             radioButtons(
-              "cbp_latest_indicator", "CBP indicator:",
+              "cbp_latest_indicator", "Economic indicator:",
               choices = c("Establishments" = "ESTAB",
                           "Employees" = "EMP",
                           "Annual payroll (Millions $)" = "PAYANN_M"),
               selected = "EMP"
             )
           ),
+          
           actionButton("clear_latest", "Clear selections"),
           helpText("Latest GDP year:"), textOutput("gdpLatestYearNote"),
-          helpText("Latest CBP year:"), textOutput("cbpLatestYearNote")
+          helpText("Latest County Business Patterns year:"), textOutput("cbpLatestYearNote")
         ),
         mainPanel(
-          tabsetPanel(
-            id = "latest_panels",
-            tabPanel(
-              "GDP by Industry",
-              plotOutput("gdpLatestBar", height = "520px"),
-              tableOutput("gdpLatestTable"),
-              helpText("Units: Millions of chained 2017 dollars (BEA CAGDP9). Bars are per county per industry; no summing across counties.")
-            ),
-            tabPanel(
-              "CBP by Industry",
-              plotOutput("cbpLatestIndustryBar", height = "520px"),
-              tableOutput("cbpLatestIndustryTable"),
-              downloadButton("download_cbp_latest_industry", "Download CBP latest by industry (CSV)"),
-              helpText("CBP by industry shows the latest year per county per industry side-by-side.",
-                       "Employees and payroll zeros treated as suppressed (omitted). Payroll displayed in millions.")
-            )
-          )
+          uiOutput("latest_main")  # Dynamically renders GDP or CBP view based on 'latest_data'
         )
       )
     )
@@ -147,11 +145,11 @@ server <- function(input, output, session) {
   observeEvent(input$clear_cbp,     { updateSelectizeInput(session, "cbp_county", selected = character(0)) })
   observeEvent(input$clear_latest,  { updateSelectizeInput(session, "latest_counties", selected = character(0)) })
   
-  # Dynamic CBP indicator label (main CBP tab)
+  # Dynamic label tweak for time-series CBP
   observeEvent(input$cbp_indicator, {
     updateSelectInput(
       session, "cbp_indicator",
-      label = if (identical(input$cbp_indicator, "PAYANN")) "Indicator: Annual payroll (Millions $)" else "Indicator:"
+      label = if (identical(input$cbp_indicator, "PAYANN")) "Economic indicator: Annual payroll (Millions $)" else "Economic indicator:"
     )
   })
   
@@ -208,7 +206,7 @@ server <- function(input, output, session) {
     }
   )
   
-  # ---- CBP time series filtered (suppress zeros, convert payroll) ----
+  # ---- County Business Patterns time series filtered (suppress zeros, convert payroll) ----
   filtered_cbp <- reactive({
     req(input$cbp_industry)
     if (is.null(input$cbp_county) || length(input$cbp_county) == 0) return(cbp_dash[0, ])
@@ -230,17 +228,17 @@ server <- function(input, output, session) {
       plot.new(); text(0.5, 0.5, "Select one or more counties to display", cex = 1.3); return()
     }
     if (identical(input$cbp_indicator, "PAYANN")) {
-      y_col <- "PAYANN_M"; ylab <- "Annual payroll (Millions $)"; y_scale <- scale_y_continuous(labels = label_dollar(suffix = "M"))
+      y_col <- "PAYANN_M"; ylab <- "Annual payroll (Millions $)"; y_scale <- scale_y_continuous(labels = scales::label_dollar(suffix = "M"))
     } else if (identical(input$cbp_indicator, "EMP")) {
-      y_col <- "EMP"; ylab <- "Employees"; y_scale <- scale_y_continuous(labels = label_comma())
+      y_col <- "EMP"; ylab <- "Employees"; y_scale <- scale_y_continuous(labels = scales::label_comma())
     } else {
-      y_col <- "ESTAB"; ylab <- "Establishments"; y_scale <- scale_y_continuous(labels = label_comma())
+      y_col <- "ESTAB"; ylab <- "Establishments"; y_scale <- scale_y_continuous(labels = scales::label_comma())
     }
     ggplot(df, aes(x = as.integer(year), y = .data[[y_col]], color = county, group = county)) +
       geom_line(linewidth = 1.2, na.rm = TRUE) +
       geom_point(size = 3, na.rm = TRUE) +
       scale_color_brewer(palette = "Dark2") +
-      scale_x_continuous(breaks = pretty_breaks()) +
+      scale_x_continuous(breaks = scales::pretty_breaks()) +
       y_scale +
       labs(
         title = paste(ylab, "for", input$cbp_industry),
@@ -266,12 +264,12 @@ server <- function(input, output, session) {
       mutate(
         Establishments = format(Establishments, big.mark = ",", scientific = FALSE),
         Employees      = ifelse(is.na(Employees), NA, format(Employees, big.mark = ",", scientific = FALSE)),
-        `Annual payroll (Millions $)` = ifelse(is.na(`Annual payroll (Millions $)`), NA, dollar(`Annual payroll (Millions $)`))
+        `Annual payroll (Millions $)` = ifelse(is.na(`Annual payroll (Millions $)`), NA, scales::dollar(`Annual payroll (Millions $)`))
       )
   }, striped = TRUE, rownames = FALSE)
   
   output$download_cbp <- downloadHandler(
-    filename = function() paste0("cbp_data_", Sys.Date(), ".csv"),
+    filename = function() paste0("county_business_patterns_data_", Sys.Date(), ".csv"),
     content = function(file) {
       df <- filtered_cbp() %>%
         select(County = county, Year = year, Industry = industry_title,
@@ -307,43 +305,7 @@ server <- function(input, output, session) {
     df %>% mutate(industry_title = factor(industry_title, levels = ord))
   })
   
-  output$gdpLatestBar <- renderPlot({
-    if (input$latest_view != "gdp_industry") return(NULL)
-    df <- gdp_latest_compare()
-    if (nrow(df) == 0 || all(is.na(df$GDP_millions))) {
-      plot.new(); text(0.5, 0.5, "Select one or more counties in the sidebar", cex = 1.3); return()
-    }
-    p <- ggplot(df, aes(x = industry_title, y = GDP_millions, fill = county)) +
-      geom_col(position = position_dodge(width = 0.85), na.rm = TRUE) +
-      coord_flip() +
-      scale_y_continuous(labels = label_dollar(suffix = "M"), expand = expansion(mult = c(0, 0.05))) +
-      scale_fill_brewer(palette = "Dark2") +
-      labs(
-        title = paste0("Real GDP by Industry, ", LATEST_GDP_YEAR),
-        subtitle = "Side-by-side comparison by county (no summing)",
-        x = "Industry",
-        y = "GDP (Millions of chained 2017 dollars)",
-        fill = "County"
-      ) +
-      theme_minimal(base_size = 13)
-    if (isTRUE(input$latest_labels)) {
-      p <- p + geom_text(aes(label = ifelse(is.na(GDP_millions), "", dollar(GDP_millions))),
-                         position = position_dodge(width = 0.85), hjust = -0.1, size = 3)
-    }
-    p
-  })
-  
-  output$gdpLatestTable <- renderTable({
-    if (input$latest_view != "gdp_industry") return(NULL)
-    df <- gdp_latest_compare()
-    if (nrow(df) == 0) return(NULL)
-    df %>%
-      arrange(industry_title, county) %>%
-      mutate(`GDP (Millions)` = dollar(GDP_millions)) %>%
-      select(Industry = industry_title, County = county, `GDP (Millions)`)
-  }, striped = TRUE, rownames = FALSE)
-  
-  # ---- CBP by Industry (Latest Year), side-by-side by county ----
+  # ---- County Business Patterns by Industry (Latest Year), side-by-side by county ----
   cbp_latest_industry <- reactive({
     if (is.null(input$latest_counties) || length(input$latest_counties) == 0) {
       return(tibble(industry_title = character(), county = character(), value = numeric()))
@@ -356,8 +318,7 @@ server <- function(input, output, session) {
         PAYANN   = dplyr::na_if(PAYANN, 0),
         PAYANN_M = PAYANN / 1000
       )
-    metric <- input$cbp_latest_indicator %||% "EMP"
-    # Order industries by total value across selected counties for clearer display
+    metric <- if (!is.null(input$cbp_latest_indicator)) input$cbp_latest_indicator else "EMP"
     ord <- df %>%
       group_by(industry_title) %>%
       summarise(total = sum(.data[[metric]], na.rm = TRUE), .groups = "drop") %>%
@@ -371,8 +332,66 @@ server <- function(input, output, session) {
       )
   })
   
+  # ---- Dynamic main panel for "Cross-sector Comparison" ----
+  output$latest_main <- renderUI({
+    if (identical(input$latest_data, LABEL_GDP)) {
+      tagList(
+        plotOutput("gdpLatestBar", height = "520px"),
+        tableOutput("gdpLatestTable"),
+        helpText("Units: Millions of chained 2017 dollars (BEA CAGDP9). Bars are per county per industry.")
+      )
+    } else {
+      tagList(
+        plotOutput("cbpLatestIndustryBar", height = "520px"),
+        helpText(CBP_EXCLUSION_NOTE),  # directly under the CBP-by-industry graph
+        tableOutput("cbpLatestIndustryTable"),
+        downloadButton("download_cbp_latest_industry", "Download County Business Patterns latest by industry (CSV)"),
+        helpText("County Business Patterns by industry shows the latest year per county per industry side-by-side.",
+                 "Employees and payroll zeros treated as suppressed (omitted). Payroll displayed in millions.")
+      )
+    }
+  })
+  
+  # ---- Render latest GDP view ----
+  output$gdpLatestBar <- renderPlot({
+    req(identical(input$latest_data, LABEL_GDP))
+    df <- gdp_latest_compare()
+    if (nrow(df) == 0 || all(is.na(df$GDP_millions))) {
+      plot.new(); text(0.5, 0.5, "Select one or more counties in the sidebar", cex = 1.3); return()
+    }
+    p <- ggplot(df, aes(x = industry_title, y = GDP_millions, fill = county)) +
+      geom_col(position = position_dodge(width = 0.85), na.rm = TRUE) +
+      coord_flip() +
+      scale_y_continuous(labels = scales::label_dollar(suffix = "M"), expand = expansion(mult = c(0, 0.05))) +
+      scale_fill_brewer(palette = "Dark2") +
+      labs(
+        title = paste0("Real GDP by Industry, ", LATEST_GDP_YEAR),
+        subtitle = "Side-by-side comparison by county",
+        x = "Industry",
+        y = "GDP (Millions of chained 2017 dollars)",
+        fill = "County"
+      ) +
+      theme_minimal(base_size = 13)
+    if (isTRUE(input$latest_labels)) {
+      p <- p + geom_text(aes(label = ifelse(is.na(GDP_millions), "", scales::dollar(GDP_millions))),
+                         position = position_dodge(width = 0.85), hjust = -0.1, size = 3)
+    }
+    p
+  })
+  
+  output$gdpLatestTable <- renderTable({
+    req(identical(input$latest_data, LABEL_GDP))
+    df <- gdp_latest_compare()
+    if (nrow(df) == 0) return(NULL)
+    df %>%
+      arrange(industry_title, county) %>%
+      mutate(`GDP (Millions)` = scales::dollar(GDP_millions)) %>%
+      select(Industry = industry_title, County = county, `GDP (Millions)`)
+  }, striped = TRUE, rownames = FALSE)
+  
+  # ---- Render latest County Business Patterns-by-industry view ----
   output$cbpLatestIndustryBar <- renderPlot({
-    if (input$latest_view != "cbp_industry") return(NULL)
+    req(identical(input$latest_data, LABEL_CBP))
     df <- cbp_latest_industry()
     if (nrow(df) == 0 || all(is.na(df$value))) {
       plot.new(); text(0.5, 0.5, "Select one or more counties in the sidebar", cex = 1.3); return()
@@ -383,16 +402,16 @@ server <- function(input, output, session) {
       geom_col(position = position_dodge(width = 0.85), na.rm = TRUE) +
       coord_flip() +
       scale_fill_brewer(palette = "Dark2") +
-      scale_y_continuous(labels = if (is_payroll) label_dollar(suffix = "M") else label_comma(),
+      scale_y_continuous(labels = if (is_payroll) scales::label_dollar(suffix = "M") else scales::label_comma(),
                          expand = expansion(mult = c(0, 0.05))) +
       labs(
-        title = paste0("CBP by Industry, ", LATEST_CBP_YEAR),
+        title = paste0("County Business Patterns by Industry, ", LATEST_CBP_YEAR),
         subtitle = y_lab,
         x = "Industry", y = y_lab, fill = "County"
       ) +
       theme_minimal(base_size = 13)
     if (isTRUE(input$latest_labels)) {
-      lbl_fun <- if (is_payroll) dollar else comma
+      lbl_fun <- if (is_payroll) scales::dollar else scales::comma
       p <- p + geom_text(aes(label = ifelse(is.na(value), "", lbl_fun(value))),
                          position = position_dodge(width = 0.85), hjust = -0.1, size = 3)
     }
@@ -400,24 +419,22 @@ server <- function(input, output, session) {
   })
   
   output$cbpLatestIndustryTable <- renderTable({
-    if (input$latest_view != "cbp_industry") return(NULL)
+    req(identical(input$latest_data, LABEL_CBP))
     df <- cbp_latest_industry()
     if (nrow(df) == 0) return(NULL)
     is_payroll <- identical(input$cbp_latest_indicator, "PAYANN_M")
     df %>%
       arrange(industry_title, county) %>%
-      mutate(Value = if (is_payroll) dollar(value) else comma(value)) %>%
+      mutate(Value = if (is_payroll) scales::dollar(value) else scales::comma(value)) %>%
       select(Industry = industry_title, County = county, Value)
   }, striped = TRUE, rownames = FALSE)
   
   output$download_cbp_latest_industry <- downloadHandler(
-    filename = function() paste0("cbp_latest_by_industry_", Sys.Date(), ".csv"),
+    filename = function() paste0("county_business_patterns_latest_by_industry_", Sys.Date(), ".csv"),
     content = function(file) {
-      is_payroll <- identical(input$cbp_latest_indicator, "PAYANN_M")
       df <- cbp_latest_industry() %>%
         arrange(industry_title, county) %>%
-        mutate(Value = if (is_payroll) value else value) %>% # raw numeric for CSV
-        select(Industry = industry_title, County = county, Value)
+        select(Industry = industry_title, County = county, Value = value)
       write.csv(df, file, row.names = FALSE)
     }
   )
